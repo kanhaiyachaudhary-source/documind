@@ -1,15 +1,15 @@
 /**
- * Hugging Face Inference API integration
- * Uses direct fetch with the new HF Router endpoints (Inference Providers)
- * Works around the broken @huggingface/inference SDK
+ * Hugging Face Inference Providers integration
+ * Uses the OpenAI-compatible Router API with auto provider selection.
  *
- * Embeddings: sentence-transformers/all-MiniLM-L6-v2 (384-dim)
- * Chat: meta-llama/Llama-3.2-3B-Instruct (free, fast, OpenAI-compatible)
+ * Embeddings: sentence-transformers/all-MiniLM-L6-v2 (384-dim, free via hf-inference)
+ * Chat: openai/gpt-oss-120b — high-quality free model with auto provider routing
  */
 
 const HF_TOKEN = process.env.HF_TOKEN!;
 const EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2";
-const CHAT_MODEL = "meta-llama/Llama-3.2-3B-Instruct";
+// Auto-select fastest provider (Cerebras/Fireworks/etc) — works on free tier
+const CHAT_MODEL = "openai/gpt-oss-120b";
 
 // ── EMBEDDINGS ──
 export async function embedText(text: string): Promise<number[]> {
@@ -30,7 +30,6 @@ export async function embedText(text: string): Promise<number[]> {
   }
 
   const result = await res.json();
-  // Result is number[] (single vector) or number[][] (batched)
   if (Array.isArray(result) && Array.isArray(result[0])) {
     return result[0] as number[];
   }
@@ -38,7 +37,6 @@ export async function embedText(text: string): Promise<number[]> {
 }
 
 export async function embedBatch(texts: string[]): Promise<number[][]> {
-  // Process sequentially to avoid rate limits on free tier
   const results: number[][] = [];
   for (const text of texts) {
     const emb = await embedText(text);
@@ -48,7 +46,7 @@ export async function embedBatch(texts: string[]): Promise<number[][]> {
   return results;
 }
 
-// ── CHAT / GENERATION (OpenAI-compatible) ──
+// ── CHAT / GENERATION (OpenAI-compatible via HF Router) ──
 export async function generateChat(systemPrompt: string, userPrompt: string, maxTokens = 1024): Promise<string> {
   const url = `https://router.huggingface.co/v1/chat/completions`;
 
@@ -101,6 +99,6 @@ CRITICAL: Respond with ONLY valid JSON. No markdown code fences, no explanation,
     return JSON.parse(jsonStr);
   } catch (e) {
     console.error("[generateJSON] Failed to parse:", jsonStr.slice(0, 500));
-    throw new Error("Model returned invalid JSON. The free model can be inconsistent — try again.");
+    throw new Error("Model returned invalid JSON. Try again.");
   }
 }
