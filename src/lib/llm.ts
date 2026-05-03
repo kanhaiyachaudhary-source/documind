@@ -3,8 +3,9 @@ import { getFullText, retrieveTopK } from "./vectorstore";
 
 // EXTRACT
 export async function extractFields(docId: string) {
-  const text = getFullText(docId).slice(0, 4000);
-  if (!text) throw new Error("Document not found");
+  const fullText = await getFullText(docId);
+  const text = fullText.slice(0, 4000);
+  if (!text) throw new Error("Document not found - it may have expired (24h TTL). Please re-upload.");
 
   const result = await generateJSON(
     `You are an enterprise document data extraction AI. Extract ALL key-value structured data from the document including names, dates, amounts, addresses, IDs, contact info, reference numbers.`,
@@ -31,8 +32,9 @@ export async function extractFields(docId: string) {
 
 // CLASSIFY
 export async function classifyDocument(docId: string) {
-  const text = getFullText(docId).slice(0, 3000);
-  if (!text) throw new Error("Document not found");
+  const fullText = await getFullText(docId);
+  const text = fullText.slice(0, 3000);
+  if (!text) throw new Error("Document not found - it may have expired (24h TTL). Please re-upload.");
 
   return generateJSON(
     `You are a document classification expert. Analyze the document and classify it.`,
@@ -51,8 +53,9 @@ export async function classifyDocument(docId: string) {
 
 // SUMMARIZE
 export async function summarizeDocument(docId: string) {
-  const text = getFullText(docId).slice(0, 6000);
-  if (!text) throw new Error("Document not found");
+  const fullText = await getFullText(docId);
+  const text = fullText.slice(0, 6000);
+  if (!text) throw new Error("Document not found - it may have expired (24h TTL). Please re-upload.");
 
   return generateJSON(
     `You are an expert document analyst. Provide comprehensive analysis.`,
@@ -78,10 +81,10 @@ export async function answerQuestion(
   const queryEmbedding = await embedText(question);
 
   // 2. Retrieve top-K relevant chunks
-  const retrieved = retrieveTopK(docId, queryEmbedding, 4);
+  const retrieved = await retrieveTopK(docId, queryEmbedding, 4);
   if (!retrieved.length) {
     return {
-      answer: "I couldn't find relevant information in the document. The document may have expired from memory — please re-upload it.",
+      answer: "Document not found or expired (24h TTL). Please re-upload.",
       sources: [],
       confidence: 0,
     };
