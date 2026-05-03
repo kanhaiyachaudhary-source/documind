@@ -1,6 +1,9 @@
-// In-memory vector store
-// Uses globalThis to persist across hot reloads in dev
-// In production on Vercel, this resets when the serverless function goes cold
+/**
+ * Vector store using Vercel KV (Upstash Redis under the hood)
+ * Persistent across serverless function invocations.
+ * Auto-expires documents after 24 hours to keep storage usage low.
+ */
+import { kv } from "@vercel/kv";
 
 interface ChunkRecord {
   id: string;
@@ -11,36 +14,33 @@ interface ChunkRecord {
   filename: string;
 }
 
-const globalStore = globalThis as any;
-if (!globalStore.__documindStore) {
-  globalStore.__documindStore = new Map<string, ChunkRecord[]>(); // doc_id -> chunks
+const TTL_SECONDS = 60 * 60 * 24; // 24 hours
+
+export async function saveChunks(docId: string, chunks: ChunkRecord[]) {
+  // Store all chunks under one key (KV supports values up to ~1MB which is plenty for ~30 chunks)
+  await kv.set(`doc:${docId}`, chunks, { ex: TTL_SECONDS });
 }
 
-const store: Map<string, ChunkRecord[]> = globalStore.__documindStore;
-
-export function saveChunks(docId: string, chunks: ChunkRecord[]) {
-  store.set(docId, chunks);
+export async function getChunks(docId: string): Promise<ChunkRecord[]> {
+  const data = await kv.get<ChunkRecord[]>(`doc:${docId}`);
+  return data || [];
 }
 
-export function getChunks(docId: string): ChunkRecord[] {
-  return store.get(docId) || [];
+export async function deleteChunks(docId: string): Promise<boolean> {
+  const result = await kv.del(`doc:${docId}`);
+  return result > 0;
 }
 
-export function deleteChunks(docId: string): boolean {
-  return store.delete(docId);
-}
-
-export function getFullText(docId: string): string {
-  const chunks = getChunks(docId);
+export async function getFullText(docId: string): Promise<string> {
+  const chunks = await getChunks(docId);
   if (!chunks.length) return "";
-  // Sort by chunk_index and concatenate
   return [...chunks]
     .sort((a, b) => a.chunk_index - b.chunk_index)
     .map((c) => c.text)
     .join("\n\n");
 }
 
-// Cosine similarity
+// Cosine similarity for in-process retrieval
 export function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length) return 0;
   let dot = 0,
@@ -54,8 +54,8 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return dot / (Math.sqrt(magA) * Math.sqrt(magB));
 }
 
-export function retrieveTopK(docId: string, queryEmbedding: number[], k = 4) {
-  const chunks = getChunks(docId);
+export async function retrieveTopK(docId: string, queryEmbedding: number[], k = 4) {
+  const chunks = await getChunks(docId);
   if (!chunks.length) return [];
 
   const scored = chunks.map((c) => ({
